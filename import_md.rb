@@ -1,10 +1,15 @@
 require 'pathname'
 require 'qiita'
+require 'csv'
+require 'replace_page_link'
 
 class ImportMd
-  def initialize access_token, host=nil, team=nil
-    raise "Need to set access token." unless access_token
-    @client = Qiita::Client.new(access_token: access_token, host: host, team: team)
+  include ReplacePageLink
+
+  def initialize access_token, host
+    @access_token = access_token
+    @host = host
+    @client = Qiita::Client.new(access_token: access_token, host: host)
   end
 
   def run full_path, tags=[]
@@ -17,11 +22,20 @@ class ImportMd
     else
       raise "#{full_path} does not exist."
     end
+    save_page_link_to_csv
   end
 
   private
-  def upload params={}
-    @client.create_item(params)
+  def upload params={}, page_link=true
+    response = @client.create_item(params)
+    if page_link
+      body = response.body
+      raise response unless body.has_key?("id")
+      @link_pairs ||= []
+      @link_pairs << [body["id"], body["title"]]
+    end
+  rescue => e
+    puts "upload error: #{e}"
   end
 
   def create_params path, tags
@@ -36,12 +50,21 @@ class ImportMd
       coediting: true,
     }
   rescue => e
-    puts e
+    puts "create_params error: #{e}"
   end
 
   # Extract tags from directory name
   def parse_directory_name path
     dirname = path.basename.to_s
     dirname.split('.')
+  end
+
+  def save_page_link_to_csv
+    return unless @link_pairs
+    CSV.open("page_link.csv", "a") do |csv|
+      csv << ["id", "file_name"]
+      @link_pairs.each { |pair| csv << pair }
+    end
+    true
   end
 end
